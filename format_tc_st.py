@@ -7,27 +7,22 @@ INDENT_SIZE = 4
 
 def normalize_spaces(stripped: str) -> str:
     """Podstawowe poprawki spacji w linii ST."""
-    # Nie tykamy pełnolinijkowych komentarzy
+    
     if stripped.startswith("//") or stripped.startswith("(*") or stripped.startswith("*"):
         return stripped
 
     s = stripped
 
-    # Najpierw napraw ': =', ':  =', itd. -> ':='
     s = re.sub(r":\s*=\s*", ":=", s)
 
-    # Spacja po przecinku
     s = re.sub(r",\s*", ", ", s)
 
-    # Spacje wokół ':=' i '=' (ale '=' nie będącego częścią ':=')
     s = re.sub(r"\s*:=\s*", " := ", s)
     s = re.sub(r"(?<!:)\s*=\s*", " = ", s)
 
-    # Nawiasy: bez spacji przed '(' i tuż po '('
     s = re.sub(r"\s+\(", "(", s)
     s = re.sub(r"\(\s+", "(", s)
-
-    # Redukcja wielokrotnych spacji (z wyjątkiem wcięcia na początku)
+    
     m = re.match(r"(\s*)(.*)", s)
     if m:
         leading, rest = m.groups()
@@ -47,7 +42,6 @@ def reformat_if_block(lines, base_indent, indent_size=INDENT_SIZE):
     upper = joined.upper()
 
     if not upper.startswith("IF ") or " THEN" not in upper:
-        # Jeżeli coś nietypowego – tylko popraw spacje i wcięcie
         out = []
         for raw in lines:
             out.append(" " * (indent_size * base_indent) + normalize_spaces(raw.lstrip()))
@@ -55,7 +49,7 @@ def reformat_if_block(lines, base_indent, indent_size=INDENT_SIZE):
 
     joined = normalize_spaces(joined).strip()
 
-    # Wytnij środek między IF a THEN
+    
     body = joined[len("IF "): joined.rfind(" THEN")]
     parts = re.split(r"\bOR\b", body)
     parts = [p.strip() for p in parts if p.strip()]
@@ -64,21 +58,16 @@ def reformat_if_block(lines, base_indent, indent_size=INDENT_SIZE):
     indent_str = " " * (indent_size * base_indent)
 
     if not parts:
-        # Awaryjnie – zostaw wszystko w jednej linii
         out_lines.append(indent_str + joined)
         return out_lines
 
-    # Pierwsza linia
     out_lines.append(f"{indent_str}IF {parts[0]}")
 
-    # Kolejne linie z OR
     if len(parts) > 1:
         for cond in parts[1:]:
             out_lines.append(f"{indent_str}OR {cond} THEN")
-        # Ostatnia linia ma już THEN – poprawimy, żeby było tylko raz
-        # (poniższa pętla da "OR X THEN" tylko w ostatniej linijce)
+    
         if len(parts) > 2:
-            # Wszystkie oprócz ostatniej: bez THEN
             out_lines = [out_lines[0]] + [
                 f"{indent_str}OR {c}" for c in parts[1:-1]
             ] + [f"{indent_str}OR {parts[-1]} THEN"]
@@ -106,7 +95,6 @@ def format_st_block(st: str, indent_size: int = INDENT_SIZE) -> str:
         line = raw.rstrip()
         stripped = line.lstrip()
 
-        # Puste linie – max 1 pod rząd (żeby nie puchło po THEN)
         if stripped == "":
             blank_count += 1
             if blank_count <= 1:
@@ -118,17 +106,14 @@ def format_st_block(st: str, indent_size: int = INDENT_SIZE) -> str:
 
         upper = stripped.upper()
 
-        # Komentarze blokowe
         if stripped.startswith("(*") or stripped.startswith("*)"):
             result.append(" " * (indent_size * indent) + stripped)
             i += 1
             continue
 
-        # Dedent przed END_*, ELSE, ELSIF
         if any(upper.startswith(tok) for tok in DEDENT_BEFORE):
             indent = max(indent - 1, 0)
 
-        # IF ... THEN – zbierz cały blok i przeformatuj
         if upper.startswith("IF "):
             if_block_lines = [stripped]
             j = i + 1
@@ -142,11 +127,10 @@ def format_st_block(st: str, indent_size: int = INDENT_SIZE) -> str:
 
             reformatted = reformat_if_block(if_block_lines, indent, indent_size)
             result.extend(reformatted)
-            indent += 1  # po THEN wchodzimy głębiej
+            indent += 1  
             i = j
             continue
 
-        # Zwykła linia – normalizacja spacji + wcięcie
         normalized = normalize_spaces(stripped)
         res_line = " " * (indent_size * indent) + normalized
         result.append(res_line)
@@ -188,7 +172,6 @@ def format_case_blocks(st: str, indent_size: int = INDENT_SIZE) -> str:
         stripped = line.lstrip()
         upper = stripped.upper()
 
-        # CASE ... OF
         if upper.startswith("CASE ") and upper.endswith(" OF"):
             inside_case = True
             case_base_indent = count_leading_spaces(line)
@@ -199,7 +182,6 @@ def format_case_blocks(st: str, indent_size: int = INDENT_SIZE) -> str:
             continue
 
         if inside_case:
-            # KONIEC CASE
             if upper.startswith("END_CASE"):
                 inside_case = False
                 case_base_indent = None
@@ -209,12 +191,11 @@ def format_case_blocks(st: str, indent_size: int = INDENT_SIZE) -> str:
                 result.append(line)
                 continue
 
-            # Pusta linia / komentarz
             if stripped == "" or stripped.startswith("//") or stripped.startswith("(*"):
                 result.append(line)
                 continue
 
-            # Etykieta: xxx:
+        
             if stripped.endswith(":"):
                 if label_indent is None:
                     label_indent = count_leading_spaces(line)
@@ -224,31 +205,25 @@ def format_case_blocks(st: str, indent_size: int = INDENT_SIZE) -> str:
                 last_label_index = len(result) - 1
                 continue
 
-            # Samotne ';'
             if stripped == ";":
                 if last_label_index is not None:
                     if last_label_has_code:
-                        # Był już kod po tej etykiecie -> ';' jest śmieciem, usuwamy
                         continue
                     else:
-                        # Puste ramię – zostaw placeholder ';' we wcięciu głębiej
                         effective_label_indent = label_indent if label_indent is not None else (case_base_indent or 0)
                         stmt_indent = effective_label_indent + indent_size
                         result.append(" " * stmt_indent + ";")
                         continue
                 else:
-                    # ';' bez etykiety – zostaw jak jest
                     result.append(line)
                     continue
 
-            # Normalna linia kodu w CASE: wcięta 1 poziom głębiej niż etykieta
             effective_label_indent = label_indent if label_indent is not None else (case_base_indent or 0)
             stmt_indent = effective_label_indent + indent_size
             result.append(" " * stmt_indent + stripped)
             last_label_has_code = True
             continue
 
-        # Poza CASE – przepisujemy bez zmian
         result.append(line)
 
     return "\n".join(result)
